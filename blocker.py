@@ -1,0 +1,202 @@
+import json
+import os
+from datetime import datetime, timedelta
+import time
+import tkinter as tk
+from tkinter import messagebox
+import ctypes
+from ctypes import wintypes
+import gui
+import bcrypt
+
+CONFIG_FILE = "config.json"
+
+def stop_all_media():
+    """Stop all media playback using multiple methods."""
+    try:
+        user32 = ctypes.windll.user32
+        
+        # Method 1: Windows Media Key commands (most reliable)
+        VK_MEDIA_STOP = 0xB2
+        VK_MEDIA_PAUSE = 0xB3
+        
+        # Simulate media stop key press
+        user32.keybd_event(VK_MEDIA_STOP, 0, 0, 0)  # Key down
+        user32.keybd_event(VK_MEDIA_STOP, 0, 2, 0)  # Key up
+        
+        time.sleep(0.1)
+        
+        # Simulate media pause key press as backup
+        user32.keybd_event(VK_MEDIA_PAUSE, 0, 0, 0)  # Key down
+        user32.keybd_event(VK_MEDIA_PAUSE, 0, 2, 0)  # Key up
+        
+        # Method 2: App command approach (backup)
+        WM_APPCOMMAND = 0x319
+        APPCOMMAND_MEDIA_STOP = 13
+        APPCOMMAND_MEDIA_PAUSE = 14
+        
+        hwnd = user32.GetDesktopWindow()
+        user32.SendMessageW(hwnd, WM_APPCOMMAND, 0, APPCOMMAND_MEDIA_STOP << 16)
+        user32.SendMessageW(hwnd, WM_APPCOMMAND, 0, APPCOMMAND_MEDIA_PAUSE << 16)
+        
+        print("Media stop commands sent")
+        
+    except Exception as e:
+        print(f"Error stopping media: {e}")
+
+
+
+def is_valid_time_format(time_str):
+    try:
+        datetime.strptime(time_str, '%H:%M')
+        return True
+    except ValueError:
+        return False
+
+def create_default_config():
+    password = "123123"
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    return {
+        "admin_password": hashed_password.decode('utf-8'),
+        "enabled": True,
+        "schedule": {str(i): {"start": "10:00", "end": "15:00"} for i in range(7)}
+    }
+
+def load_config():
+    if not os.path.exists(CONFIG_FILE):
+        config = create_default_config()
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
+        return config
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return create_default_config()
+
+class Blocker:
+    def __init__(self, root):
+        self.root = root
+        self.config = load_config()
+        self.is_blocked = False
+        self.block_window = None
+        self.temporarily_unlocked_until = None
+        self.timer = None
+
+        self.check_time()
+
+    def is_time_to_block(self):
+        if self.temporarily_unlocked_until and datetime.now() < self.temporarily_unlocked_until:
+            return False # Temporarily unlocked
+
+        if not self.config.get("enabled", False):
+            return False
+
+        now = datetime.now()
+        weekday = str(now.weekday()) # Monday is 0, Sunday is 6
+        
+        schedule = self.config.get("schedule", {})
+        day_schedule = schedule.get(weekday)
+
+        if not day_schedule:
+            return True # Block if no schedule for today
+
+        try:
+            start_time = datetime.strptime(day_schedule['start'], '%H:%M').time()
+            end_time = datetime.strptime(day_schedule['end'], '%H:%M').time()
+            current_time = now.time()
+
+            if start_time <= end_time:
+                return not (start_time <= current_time <= end_time)
+            else: # Overnight schedule
+                return not (current_time >= start_time or current_time <= end_time)
+        except (ValueError, KeyError):
+            return True # Block on error
+
+    def check_time(self):
+        if self.is_time_to_block():
+            if not self.is_blocked:
+                self.show_block_screen()
+        else:
+            if self.is_blocked:
+                self.hide_block_screen()
+        
+        self.timer = self.root.after(10000, self.check_time) # Check every 10 seconds
+
+    def show_block_screen(self):
+        self.is_blocked = True
+        if self.block_window is None or not self.block_window.winfo_exists():
+            # Stop all media playback
+            stop_all_media()
+            
+            self.block_window = tk.Toplevel(self.root)
+            self.block_window.title("Доступ ограничен")
+            self.block_window.attributes("-fullscreen", True)
+            self.block_window.attributes("-topmost", True)
+            self.block_window.attributes("-alpha", 0.85) # Make window semi-transparent
+            self.block_window.protocol("WM_DELETE_WINDOW", self.do_nothing) # Prevent closing
+            
+            # Lock workstation as an additional measure
+            try:
+                ctypes.windll.user32.LockWorkStation()
+            except AttributeError:
+                pass # Not on Windows or something went wrong
+
+            main_frame = tk.Frame(self.block_window, bg='black')
+            main_frame.pack(expand=True, fill=tk.BOTH)
+
+            tk.Label(main_frame, text="Доступ к компьютеру ограничен", font=("Helvetica", 32), bg='black', fg='white').pack(pady=50)
+            
+            unlock_button = tk.Button(main_frame, text="Ввести пароль", command=self.ask_for_unlock)
+            unlock_button.pack(pady=20)
+            
+            settings_button = tk.Button(main_frame, text="Настройки", command=self.open_settings)
+            settings_button.pack(pady=20)
+
+    def hide_block_screen(self):
+        self.is_blocked = False
+        if self.block_window and self.block_window.winfo_exists():
+            self.block_window.destroy()
+            self.block_window = None
+
+    def ask_for_unlock(self):
+        if gui.ask_password(self.config):
+            self.hide_block_screen()
+            # Temporarily disable for 1 hour
+            self.temporarily_unlocked_until = datetime.now() + timedelta(hours=1)
+            messagebox.showinfo("Разблокировано", "Доступ разрешен на 1 час.")
+
+    def open_settings(self):
+        # Schedule the settings dialog to run in the main thread
+        self.root.after(0, self._open_settings_main_thread)
+
+    def _open_settings_main_thread(self):
+        if gui.ask_password(self.config):
+            # Hide the block screen to show the settings
+            if self.is_blocked:
+                self.hide_block_screen()
+            
+            settings_win = gui.SettingsWindow(self.root)
+            self.root.wait_window(settings_win.window)
+            
+            # Reload config and re-evaluate blocking status
+            self.config = load_config()
+            self.check_time()
+
+    def lock_now(self):
+        """Immediately locks the screen, cancelling any temporary unlock."""
+        # Schedule the lock to run in the main thread
+        self.root.after(0, self._lock_now_main_thread)
+
+    def _lock_now_main_thread(self):
+        self.temporarily_unlocked_until = None
+        if not self.is_blocked:
+            self.show_block_screen()
+
+    def stop(self):
+        """Stops the blocker's timer."""
+        if self.timer:
+            self.root.after_cancel(self.timer)
+
+    def do_nothing(self):
+        pass
