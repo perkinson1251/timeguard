@@ -1,3 +1,4 @@
 bcrypt
 pystray
 pillow
+pywin32
