@@ -174,13 +174,39 @@ class Blocker:
             main_frame = tk.Frame(self.block_window, bg='black')
             main_frame.pack(expand=True, fill=tk.BOTH)
 
-            tk.Label(main_frame, text=_('access_restricted'), font=("Helvetica", 32), bg='black', fg='white').pack(pady=50)
+            center_frame = tk.Frame(main_frame, bg='black')
+            center_frame.pack(expand=True, fill=tk.BOTH)
             
-            unlock_button = tk.Button(main_frame, text=_('enter_password'), command=self.ask_for_unlock)
-            unlock_button.pack(pady=20)
+            title_label = tk.Label(center_frame, 
+                                 text=_('access_restricted'), 
+                                 font=("Helvetica", 36, "bold"), 
+                                 bg='black', 
+                                 fg='white')
+            title_label.pack(pady=(100, 80))
             
-            settings_button = tk.Button(main_frame, text=_('settings'), command=self.open_settings)
-            settings_button.pack(pady=20)
+            unlock_button = tk.Button(center_frame, 
+                                    text=_('enter_password'), 
+                                    command=self.ask_for_unlock,
+                                    font=("Helvetica", 18, "bold"),
+                                    bg='#2c3e50',
+                                    fg='white',
+                                    activebackground='#3498db',
+                                    activeforeground='white',
+                                    relief='flat',
+                                    bd=0,
+                                    padx=40,
+                                    pady=15,
+                                    cursor='hand2')
+            unlock_button.pack(pady=30)
+            
+            def on_enter(e):
+                unlock_button.config(bg='#3498db')
+            
+            def on_leave(e):
+                unlock_button.config(bg='#2c3e50')
+            
+            unlock_button.bind("<Enter>", on_enter)
+            unlock_button.bind("<Leave>", on_leave)
 
     def hide_block_screen(self):
         self.is_blocked = False
