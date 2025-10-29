@@ -10,6 +10,7 @@ import gui
 import bcrypt
 import win32gui
 import win32con
+from localization import get_localization, _
 
 CONFIG_FILE = "config.json"
 
@@ -158,7 +159,7 @@ class Blocker:
             minimize_fullscreen_windows()
 
             self.block_window = tk.Toplevel(self.root)
-            self.block_window.title("Доступ ограничен")
+            self.block_window.title(_('access_restricted'))
             self.block_window.attributes("-fullscreen", True)
             self.block_window.attributes("-topmost", True)
             self.block_window.attributes("-alpha", 0.85) # Make window semi-transparent
@@ -173,12 +174,12 @@ class Blocker:
             main_frame = tk.Frame(self.block_window, bg='black')
             main_frame.pack(expand=True, fill=tk.BOTH)
 
-            tk.Label(main_frame, text="Доступ к компьютеру ограничен", font=("Helvetica", 32), bg='black', fg='white').pack(pady=50)
+            tk.Label(main_frame, text=_('access_restricted'), font=("Helvetica", 32), bg='black', fg='white').pack(pady=50)
             
-            unlock_button = tk.Button(main_frame, text="Ввести пароль", command=self.ask_for_unlock)
+            unlock_button = tk.Button(main_frame, text=_('enter_password'), command=self.ask_for_unlock)
             unlock_button.pack(pady=20)
             
-            settings_button = tk.Button(main_frame, text="Настройки", command=self.open_settings)
+            settings_button = tk.Button(main_frame, text=_('settings'), command=self.open_settings)
             settings_button.pack(pady=20)
 
     def hide_block_screen(self):
@@ -192,7 +193,7 @@ class Blocker:
             self.hide_block_screen()
             # Temporarily disable for 1 hour
             self.temporarily_unlocked_until = datetime.now() + timedelta(hours=1)
-            messagebox.showinfo("Разблокировано", "Доступ разрешен на 1 час.")
+            messagebox.showinfo(_('unlocked'), _('unlocked_message'))
 
     def open_settings(self):
         # Schedule the settings dialog to run in the main thread

@@ -4,11 +4,13 @@ from pystray import MenuItem as item
 import pystray
 from PIL import Image, ImageDraw
 import threading
+from localization import get_localization, _
 
 class App:
     def __init__(self):
         self.root = tk.Tk()
         self.root.withdraw()  # Hide the main window
+        self.localization = get_localization()
         self.blocker = blocker.Blocker(self.root)
         self.icon = None
 
@@ -30,12 +32,12 @@ class App:
 
     def setup_tray(self):
         menu = (
-            item('Настройки', self.blocker.open_settings),
-            item('Заблокировать сейчас', self.blocker.lock_now),
+            item(_('settings'), self.blocker.open_settings),
+            item(_('block_now'), self.blocker.lock_now),
             pystray.Menu.SEPARATOR,
-            item('Выход', self.stop_app)
+            item(_('exit'), self.stop_app)
         )
-        self.icon = pystray.Icon("name", self.create_image(), "Blocker", menu)
+        self.icon = pystray.Icon("name", self.create_image(), _('app_title'), menu)
         self.icon.run()
 
     def stop_app(self):
