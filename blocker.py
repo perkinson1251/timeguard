@@ -8,6 +8,8 @@ import ctypes
 from ctypes import wintypes
 import gui
 import bcrypt
+import win32gui
+import win32con
 
 CONFIG_FILE = "config.json"
 
@@ -44,7 +46,32 @@ def stop_all_media():
     except Exception as e:
         print(f"Error stopping media: {e}")
 
-
+def minimize_fullscreen_windows():
+    """Minimize all fullscreen windows to ensure the block screen is visible."""
+    try:
+        def callback(hwnd, extra):
+            if win32gui.IsWindowVisible(hwnd) and hwnd != extra:
+                # Check if window is fullscreen
+                try:
+                    rect = win32gui.GetWindowRect(hwnd)
+                    # Get screen dimensions
+                    screen_width = ctypes.windll.user32.GetSystemMetrics(0)
+                    screen_height = ctypes.windll.user32.GetSystemMetrics(1)
+                    
+                    # If window covers the entire screen, minimize it
+                    if (rect[2] - rect[0] >= screen_width and 
+                        rect[3] - rect[1] >= screen_height):
+                        win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                except:
+                    pass
+            return True
+        
+        # Get our block window handle to avoid minimizing it
+        desktop = win32gui.GetDesktopWindow()
+        win32gui.EnumWindows(callback, desktop)
+        
+    except Exception as e:
+        print(f"Error minimizing fullscreen windows: {e}")
 
 def is_valid_time_format(time_str):
     try:
@@ -128,7 +155,8 @@ class Blocker:
         if self.block_window is None or not self.block_window.winfo_exists():
             # Stop all media playback
             stop_all_media()
-            
+            minimize_fullscreen_windows()
+
             self.block_window = tk.Toplevel(self.root)
             self.block_window.title("Доступ ограничен")
             self.block_window.attributes("-fullscreen", True)
