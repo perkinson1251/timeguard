@@ -11,6 +11,7 @@ import bcrypt
 import win32gui
 import win32con
 from localization import get_localization, _
+from keyboard_blocker import KeyboardBlocker
 
 CONFIG_FILE = "config.json"
 
@@ -110,6 +111,7 @@ class Blocker:
         self.block_window = None
         self.temporarily_unlocked_until = None
         self.timer = None
+        self.keyboard_blocker = None  # Keyboard blocker instance
 
         self.check_time()
 
@@ -157,6 +159,15 @@ class Blocker:
             # Stop all media playback
             stop_all_media()
             minimize_fullscreen_windows()
+
+            # Start keyboard blocker to prevent Win key and system shortcuts
+            try:
+                if self.keyboard_blocker is None:
+                    self.keyboard_blocker = KeyboardBlocker()
+                self.keyboard_blocker.start()
+                print("[Blocker] Keyboard blocking activated")
+            except Exception as e:
+                print(f"[Blocker] Failed to start keyboard blocker: {e}")
 
             self.block_window = tk.Toplevel(self.root)
             self.block_window.title(_('access_restricted'))
@@ -210,6 +221,15 @@ class Blocker:
 
     def hide_block_screen(self):
         self.is_blocked = False
+        
+        # Stop keyboard blocker
+        try:
+            if self.keyboard_blocker:
+                self.keyboard_blocker.stop()
+                print("[Blocker] Keyboard blocking deactivated")
+        except Exception as e:
+            print(f"[Blocker] Error stopping keyboard blocker: {e}")
+        
         if self.block_window and self.block_window.winfo_exists():
             self.block_window.destroy()
             self.block_window = None
@@ -249,9 +269,17 @@ class Blocker:
             self.show_block_screen()
 
     def stop(self):
-        """Stops the blocker's timer."""
+        """Stops the blocker's timer and keyboard blocker."""
         if self.timer:
             self.root.after_cancel(self.timer)
+        
+        # Ensure keyboard blocker is stopped
+        try:
+            if self.keyboard_blocker:
+                self.keyboard_blocker.stop()
+                print("[Blocker] Keyboard blocker stopped on exit")
+        except Exception as e:
+            print(f"[Blocker] Error stopping keyboard blocker on exit: {e}")
 
     def do_nothing(self):
         pass
