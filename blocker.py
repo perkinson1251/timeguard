@@ -13,6 +13,16 @@ import win32con
 from localization import get_localization, _
 from keyboard_blocker import KeyboardBlocker
 
+# Audio control imports
+try:
+    from comtypes import CLSCTX_ALL, CoInitialize
+    from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+    AUDIO_AVAILABLE = True
+    print("[System] Audio control libraries loaded successfully")
+except ImportError as e:
+    print(f"[System] Audio control not available: {e}")
+    AUDIO_AVAILABLE = False
+
 CONFIG_FILE = "config.json"
 
 def stop_all_media():
@@ -75,6 +85,104 @@ def minimize_fullscreen_windows():
     except Exception as e:
         print(f"Error minimizing fullscreen windows: {e}")
 
+def get_volume_interface():
+    """Get the audio volume interface."""
+    if not AUDIO_AVAILABLE:
+        print("[Volume] Audio control libraries not available")
+        return None
+    
+    try:
+        # Initialize COM
+        try:
+            CoInitialize()
+        except:
+            pass  # Already initialized
+        
+        # Get default audio device
+        devices = AudioUtilities.GetSpeakers()
+        
+        # Check if devices has _dev attribute (newer pycaw)
+        if hasattr(devices, '_dev'):
+            print("[Volume] Using _dev attribute for newer pycaw")
+            interface = devices._dev.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        else:
+            # Older pycaw API
+            print("[Volume] Using direct Activate for older pycaw")
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        
+        # Cast to IAudioEndpointVolume pointer
+        volume = ctypes.cast(interface, ctypes.POINTER(IAudioEndpointVolume))
+        print(f"[Volume] Successfully obtained volume interface")
+        return volume
+    except Exception as e:
+        print(f"[Volume] Error getting volume interface: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def get_current_volume():
+    """Get current system volume level (0.0 to 1.0)."""
+    try:
+        volume = get_volume_interface()
+        if volume:
+            current_volume = volume.GetMasterVolumeLevelScalar()
+            print(f"[Volume] Current volume level: {current_volume * 100:.0f}%")
+            return current_volume
+        else:
+            print("[Volume] Failed to get volume interface")
+    except Exception as e:
+        print(f"[Volume] Error getting current volume: {e}")
+        import traceback
+        traceback.print_exc()
+    return None
+
+def set_volume(level):
+    """Set system volume level (0.0 to 1.0)."""
+    try:
+        volume = get_volume_interface()
+        if volume:
+            # Clamp value between 0.0 and 1.0
+            level = max(0.0, min(1.0, level))
+            volume.SetMasterVolumeLevelScalar(level, None)
+            print(f"[Volume] Volume set to: {level * 100:.0f}%")
+            return True
+        else:
+            print("[Volume] Failed to get volume interface for setting")
+    except Exception as e:
+        print(f"[Volume] Error setting volume: {e}")
+        import traceback
+        traceback.print_exc()
+    return False
+
+def minimize_all_windows():
+    """Minimize all windows (show desktop)."""
+    try:
+        # Simulate Win+D to show desktop
+        # This is more reliable than manually minimizing windows
+        shell = ctypes.windll.shell32
+        shell.SHGetSpecialFolderPathW(0, None, 0, False)
+        
+        # Alternative: use keybd_event to simulate Win+D
+        user32 = ctypes.windll.user32
+        VK_LWIN = 0x5B
+        VK_D = 0x44
+        
+        # Press Win key
+        user32.keybd_event(VK_LWIN, 0, 0, 0)
+        time.sleep(0.05)
+        # Press D key
+        user32.keybd_event(VK_D, 0, 0, 0)
+        time.sleep(0.05)
+        # Release D key
+        user32.keybd_event(VK_D, 0, 2, 0)
+        time.sleep(0.05)
+        # Release Win key
+        user32.keybd_event(VK_LWIN, 0, 2, 0)
+        
+        print("All windows minimized (desktop shown)")
+    except Exception as e:
+        print(f"Error minimizing all windows: {e}")
+
 def is_valid_time_format(time_str):
     try:
         datetime.strptime(time_str, '%H:%M')
@@ -112,6 +220,9 @@ class Blocker:
         self.temporarily_unlocked_until = None
         self.timer = None
         self.keyboard_blocker = None  # Keyboard blocker instance
+        self.password_entry = None  # Password entry field on block screen
+        self.error_label = None  # Error label on block screen
+        self.saved_volume = None  # Save volume level before blocking
 
         self.check_time()
 
@@ -156,7 +267,33 @@ class Blocker:
     def show_block_screen(self):
         self.is_blocked = True
         if self.block_window is None or not self.block_window.winfo_exists():
+            print("[Blocker] ===== STARTING BLOCK SCREEN =====")
+            
+            # Save current volume level
+            print("[Blocker] Saving current volume level...")
+            self.saved_volume = get_current_volume()
+            if self.saved_volume is not None:
+                print(f"[Blocker] Saved volume: {self.saved_volume * 100:.0f}%")
+            else:
+                print("[Blocker] WARNING: Could not save current volume!")
+            
+            # Set volume to 0
+            print("[Blocker] Setting volume to 0%...")
+            success = set_volume(0.0)
+            if success:
+                print("[Blocker] Volume muted successfully")
+            else:
+                print("[Blocker] WARNING: Failed to mute volume!")
+            
+            # Minimize all windows to show desktop
+            print("[Blocker] Minimizing all windows...")
+            minimize_all_windows()
+            
+            # Small delay to let desktop show
+            time.sleep(0.1)
+            
             # Stop all media playback
+            print("[Blocker] Stopping media playback...")
             stop_all_media()
             minimize_fullscreen_windows()
 
@@ -193,11 +330,37 @@ class Blocker:
                                  font=("Helvetica", 36, "bold"), 
                                  bg='black', 
                                  fg='white')
-            title_label.pack(pady=(100, 80))
+            title_label.pack(pady=(100, 40))
+            
+            # Password input frame
+            password_frame = tk.Frame(center_frame, bg='black')
+            password_frame.pack(pady=30)
+            
+            password_label = tk.Label(password_frame, 
+                                    text=_('admin_password') + ":", 
+                                    font=("Helvetica", 16), 
+                                    bg='black', 
+                                    fg='white')
+            password_label.pack(pady=(0, 10))
+            
+            self.password_entry = tk.Entry(password_frame, 
+                                          show='*',
+                                          font=("Helvetica", 18),
+                                          width=20,
+                                          bg='#34495e',
+                                          fg='white',
+                                          insertbackground='white',
+                                          relief='flat',
+                                          bd=5)
+            self.password_entry.pack(pady=10)
+            self.password_entry.focus_set()  # Set focus to password entry
+            
+            # Bind Enter key to check password
+            self.password_entry.bind('<Return>', lambda e: self.check_password_inline())
             
             unlock_button = tk.Button(center_frame, 
-                                    text=_('enter_password'), 
-                                    command=self.ask_for_unlock,
+                                    text=_('unlock'),
+                                    command=self.check_password_inline,
                                     font=("Helvetica", 18, "bold"),
                                     bg='#2c3e50',
                                     fg='white',
@@ -218,9 +381,31 @@ class Blocker:
             
             unlock_button.bind("<Enter>", on_enter)
             unlock_button.bind("<Leave>", on_leave)
+            
+            # Error message label (initially hidden)
+            self.error_label = tk.Label(center_frame,
+                                       text="",
+                                       font=("Helvetica", 14),
+                                       bg='black',
+                                       fg='#e74c3c')
+            self.error_label.pack(pady=10)
 
     def hide_block_screen(self):
         self.is_blocked = False
+        
+        print("[Blocker] ===== HIDING BLOCK SCREEN =====")
+        
+        # Restore volume to previous level
+        if self.saved_volume is not None:
+            print(f"[Blocker] Restoring volume to {self.saved_volume * 100:.0f}%...")
+            success = set_volume(self.saved_volume)
+            if success:
+                print(f"[Blocker] Volume restored successfully to {self.saved_volume * 100:.0f}%")
+            else:
+                print("[Blocker] WARNING: Failed to restore volume!")
+            self.saved_volume = None
+        else:
+            print("[Blocker] No saved volume to restore")
         
         # Stop keyboard blocker
         try:
@@ -233,13 +418,40 @@ class Blocker:
         if self.block_window and self.block_window.winfo_exists():
             self.block_window.destroy()
             self.block_window = None
+        
+        print("[Blocker] Block screen hidden")
+
+    def check_password_inline(self):
+        """Check password directly from the block screen without opening a dialog."""
+        password = self.password_entry.get()
+        
+        if not password:
+            self.error_label.config(text=_('password') + " " + _('required'))
+            self.password_entry.delete(0, tk.END)
+            return
+        
+        hashed_password = self.config.get("admin_password", "").encode('utf-8')
+        
+        try:
+            if hashed_password and bcrypt.checkpw(password.encode('utf-8'), hashed_password):
+                # Password is correct
+                self.hide_block_screen()
+                # Temporarily disable for 1 hour
+                self.temporarily_unlocked_until = datetime.now() + timedelta(hours=1)
+                messagebox.showinfo(_('unlocked'), _('unlocked_message'))
+            else:
+                # Wrong password
+                self.error_label.config(text=_('invalid_password'))
+                self.password_entry.delete(0, tk.END)
+                self.password_entry.focus_set()
+        except Exception as e:
+            print(f"Error checking password: {e}")
+            self.error_label.config(text=_('error'))
+            self.password_entry.delete(0, tk.END)
 
     def ask_for_unlock(self):
-        if gui.ask_password(self.config):
-            self.hide_block_screen()
-            # Temporarily disable for 1 hour
-            self.temporarily_unlocked_until = datetime.now() + timedelta(hours=1)
-            messagebox.showinfo(_('unlocked'), _('unlocked_message'))
+        """Legacy method - now handled inline in the block screen."""
+        pass
 
     def open_settings(self):
         # Schedule the settings dialog to run in the main thread
@@ -251,10 +463,15 @@ class Blocker:
             if self.is_blocked:
                 self.hide_block_screen()
             
-            settings_win = gui.SettingsWindow(self.root)
+            # Create callback to reload config immediately after save
+            def reload_config():
+                self.config = load_config()
+                self.check_time()
+            
+            settings_win = gui.SettingsWindow(self.root, on_save_callback=reload_config)
             self.root.wait_window(settings_win.window)
             
-            # Reload config and re-evaluate blocking status
+            # Reload config and re-evaluate blocking status (in case window was closed without saving)
             self.config = load_config()
             self.check_time()
 

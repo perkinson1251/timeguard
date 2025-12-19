@@ -6,11 +6,12 @@ import blocker
 from localization import get_localization, _
 
 class SettingsWindow:
-    def __init__(self, parent, config_path="config.json"):
+    def __init__(self, parent, config_path="config.json", on_save_callback=None):
         self.parent = parent
         self.config_path = config_path
         self.config = self.load_config()
         self.localization = get_localization()
+        self.on_save_callback = on_save_callback
 
         self.window = tk.Toplevel(parent)
         self.window.title(_('settings_title'))
@@ -156,6 +157,11 @@ class SettingsWindow:
         try:
             with open(self.config_path, 'w') as f:
                 json.dump(self.config, f, indent=2)
+            
+            # Call the callback to update the blocker immediately
+            if self.on_save_callback:
+                self.on_save_callback()
+            
             messagebox.showinfo(_('success'), _('settings_saved'))
             self.window.destroy()
         except Exception as e:

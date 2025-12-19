@@ -19,7 +19,7 @@
   "success": "Success",
   "error": "Error",
   "password_changed": "Password successfully changed.",
-  "settings_saved": "Settings saved. Restart the program for them to take effect.",
+  "settings_saved": "Settings saved successfully.",
   "settings_save_error": "Could not save settings: {error}",
   "invalid_time_format": "Invalid time format for day '{day}'. Use HH:MM.",
   "invalid_password": "Invalid password.",
@@ -33,5 +33,7 @@
   "saturday": "Saturday",
   "sunday": "Sunday",
   "language": "Language",
-  "language_settings": "Language settings"
+  "language_settings": "Language settings",
+  "unlock": "Unlock",
+  "required": "required"
 }

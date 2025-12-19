@@ -2,3 +2,5 @@ bcrypt
 pystray
 pillow
 pywin32
+pycaw
+comtypes
