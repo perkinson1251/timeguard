@@ -39,48 +39,66 @@ def force_window_to_top(hwnd):
     """Force a window to be on top of all other windows, including fullscreen apps."""
     try:
         user32 = ctypes.windll.user32
+        attached = False
+        current_thread_id = 0
+        foreground_thread_id = 0
         
-        # First, try to get the current foreground window
-        current_foreground = user32.GetForegroundWindow()
+        try:
+            # First, try to get the current foreground window
+            current_foreground = user32.GetForegroundWindow()
+            
+            # Get thread IDs
+            current_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
+            foreground_thread_id = user32.GetWindowThreadProcessId(current_foreground, None)
+            
+            # Attach to the foreground thread to be able to set foreground window
+            if current_thread_id != foreground_thread_id and foreground_thread_id != 0:
+                user32.AttachThreadInput(current_thread_id, foreground_thread_id, True)
+                attached = True
+        except:
+            pass
         
-        # Get thread IDs
-        current_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
-        foreground_thread_id = user32.GetWindowThreadProcessId(current_foreground, None)
+        try:
+            # Set as topmost using SetWindowPos
+            user32.SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW
+            )
+        except:
+            pass
         
-        # Attach to the foreground thread to be able to set foreground window
-        if current_thread_id != foreground_thread_id:
-            user32.AttachThreadInput(current_thread_id, foreground_thread_id, True)
+        try:
+            # Bring to foreground
+            user32.SetForegroundWindow(hwnd)
+            user32.BringWindowToTop(hwnd)
+        except:
+            pass
         
-        # Set as topmost using SetWindowPos
-        user32.SetWindowPos(
-            hwnd,
-            HWND_TOPMOST,
-            0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW
-        )
-        
-        # Bring to foreground
-        user32.SetForegroundWindow(hwnd)
-        user32.BringWindowToTop(hwnd)
-        
-        # Set focus
-        user32.SetFocus(hwnd)
+        try:
+            # Set focus
+            user32.SetFocus(hwnd)
+        except:
+            pass
         
         # Detach from the foreground thread
-        if current_thread_id != foreground_thread_id:
-            user32.AttachThreadInput(current_thread_id, foreground_thread_id, False)
+        if attached and current_thread_id != foreground_thread_id:
+            try:
+                user32.AttachThreadInput(current_thread_id, foreground_thread_id, False)
+            except:
+                pass
         
         return True
-    except Exception as e:
-        log_debug(f"Window] Error forcing window to top: {e}")
+    except:
         return False
 
 def minimize_all_other_windows(exclude_hwnd):
     """Minimize all windows except the specified one."""
     try:
         def callback(hwnd, exclude):
-            if hwnd != exclude and win32gui.IsWindowVisible(hwnd):
-                try:
+            try:
+                if hwnd != exclude and win32gui.IsWindowVisible(hwnd):
                     # Check if window is a normal window (not a system window)
                     style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
                     if style & win32con.WS_VISIBLE and not (style & win32con.WS_DISABLED):
@@ -89,13 +107,13 @@ def minimize_all_other_windows(exclude_hwnd):
                         excluded_classes = ['Shell_TrayWnd', 'Progman', 'WorkerW', 'Button', 'tooltips_class32']
                         if class_name not in excluded_classes:
                             win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
-                except Exception as e:
-                    pass
+            except:
+                pass  # Ignore errors for individual windows
             return True
         
         win32gui.EnumWindows(callback, exclude_hwnd)
-    except Exception as e:
-        log_debug(f"Window] Error minimizing windows: {e}")
+    except:
+        pass  # Silently ignore - not critical
 
 def stop_all_media():
     """Stop all media playback using multiple methods."""
@@ -386,11 +404,12 @@ class Blocker:
             self.block_window.attributes("-alpha", 0.85) # Make window semi-transparent
             self.block_window.protocol("WM_DELETE_WINDOW", self.do_nothing) # Prevent closing
             
-            # Lock workstation as an additional measure
-            try:
-                ctypes.windll.user32.LockWorkStation()
-            except AttributeError:
-                pass # Not on Windows or something went wrong
+            # Lock workstation as an additional measure (optional, may fail without admin)
+            # Disabled - can cause issues and is not essential
+            # try:
+            #     ctypes.windll.user32.LockWorkStation()
+            # except:
+            #     pass
 
             main_frame = tk.Frame(self.block_window, bg='black')
             main_frame.pack(expand=True, fill=tk.BOTH)
@@ -500,24 +519,35 @@ class Blocker:
                 pass
             
             if hwnd:
-                # Minimize all other windows first
-                minimize_all_other_windows(hwnd)
+                # Minimize all other windows first (may fail without admin rights)
+                try:
+                    minimize_all_other_windows(hwnd)
+                except:
+                    pass
                 
-                # Force window to top
-                force_window_to_top(hwnd)
+                # Force window to top (may fail without admin rights)
+                try:
+                    force_window_to_top(hwnd)
+                except:
+                    pass
                 
-                # Re-apply tkinter topmost attribute
-                self.block_window.attributes("-topmost", True)
-                
-                # Lift the window
-                self.block_window.lift()
+                # Re-apply tkinter topmost attribute (safe)
+                try:
+                    self.block_window.attributes("-topmost", True)
+                    self.block_window.lift()
+                except:
+                    pass
                 
                 # Focus the password entry
-                if self.password_entry and self.password_entry.winfo_exists():
-                    self.password_entry.focus_force()
+                try:
+                    if self.password_entry and self.password_entry.winfo_exists():
+                        self.password_entry.focus_force()
+                except:
+                    pass
             
         except Exception as e:
-            log_debug(f"Blocker] Error enforcing topmost: {e}")
+            # Silently ignore - this is not critical
+            pass
         
         # Schedule next check
         self._schedule_topmost_check()
