@@ -10,6 +10,7 @@ import gui
 import bcrypt
 import win32gui
 import win32con
+import win32process
 from localization import get_localization, _
 from keyboard_blocker import KeyboardBlocker
 
@@ -24,6 +25,76 @@ except ImportError as e:
     AUDIO_AVAILABLE = False
 
 CONFIG_FILE = "config.json"
+
+# Windows constants for SetWindowPos
+HWND_TOPMOST = -1
+HWND_NOTOPMOST = -2
+SWP_NOMOVE = 0x0002
+SWP_NOSIZE = 0x0001
+SWP_SHOWWINDOW = 0x0040
+SWP_NOACTIVATE = 0x0010
+
+def force_window_to_top(hwnd):
+    """Force a window to be on top of all other windows, including fullscreen apps."""
+    try:
+        user32 = ctypes.windll.user32
+        
+        # First, try to get the current foreground window
+        current_foreground = user32.GetForegroundWindow()
+        
+        # Get thread IDs
+        current_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
+        foreground_thread_id = user32.GetWindowThreadProcessId(current_foreground, None)
+        
+        # Attach to the foreground thread to be able to set foreground window
+        if current_thread_id != foreground_thread_id:
+            user32.AttachThreadInput(current_thread_id, foreground_thread_id, True)
+        
+        # Set as topmost using SetWindowPos
+        user32.SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW
+        )
+        
+        # Bring to foreground
+        user32.SetForegroundWindow(hwnd)
+        user32.BringWindowToTop(hwnd)
+        
+        # Set focus
+        user32.SetFocus(hwnd)
+        
+        # Detach from the foreground thread
+        if current_thread_id != foreground_thread_id:
+            user32.AttachThreadInput(current_thread_id, foreground_thread_id, False)
+        
+        return True
+    except Exception as e:
+        print(f"[Window] Error forcing window to top: {e}")
+        return False
+
+def minimize_all_other_windows(exclude_hwnd):
+    """Minimize all windows except the specified one."""
+    try:
+        def callback(hwnd, exclude):
+            if hwnd != exclude and win32gui.IsWindowVisible(hwnd):
+                try:
+                    # Check if window is a normal window (not a system window)
+                    style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+                    if style & win32con.WS_VISIBLE and not (style & win32con.WS_DISABLED):
+                        # Get window class name to exclude system windows
+                        class_name = win32gui.GetClassName(hwnd)
+                        excluded_classes = ['Shell_TrayWnd', 'Progman', 'WorkerW', 'Button', 'tooltips_class32']
+                        if class_name not in excluded_classes:
+                            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                except Exception as e:
+                    pass
+            return True
+        
+        win32gui.EnumWindows(callback, exclude_hwnd)
+    except Exception as e:
+        print(f"[Window] Error minimizing windows: {e}")
 
 def stop_all_media():
     """Stop all media playback using multiple methods."""
@@ -219,6 +290,7 @@ class Blocker:
         self.block_window = None
         self.temporarily_unlocked_until = None
         self.timer = None
+        self.topmost_timer = None  # Timer for keeping window on top
         self.keyboard_blocker = None  # Keyboard blocker instance
         self.password_entry = None  # Password entry field on block screen
         self.error_label = None  # Error label on block screen
@@ -389,11 +461,78 @@ class Blocker:
                                        bg='black',
                                        fg='#e74c3c')
             self.error_label.pack(pady=10)
+            
+            # Start periodic topmost enforcement after window is shown
+            self.block_window.after(100, self._start_topmost_enforcement)
+
+    def _start_topmost_enforcement(self):
+        """Start the periodic enforcement of topmost state."""
+        if self.block_window and self.block_window.winfo_exists():
+            # Initial force to top
+            self._enforce_topmost()
+            # Start periodic timer (every 500ms)
+            self._schedule_topmost_check()
+    
+    def _schedule_topmost_check(self):
+        """Schedule the next topmost check."""
+        if self.is_blocked and self.block_window and self.block_window.winfo_exists():
+            self.topmost_timer = self.block_window.after(500, self._enforce_topmost)
+    
+    def _enforce_topmost(self):
+        """Force the block window to stay on top of all other windows."""
+        if not self.is_blocked or not self.block_window or not self.block_window.winfo_exists():
+            return
+        
+        try:
+            # Get the window handle
+            hwnd = int(self.block_window.winfo_id())
+            # Some tkinter versions need the parent window
+            # Try to get the actual top-level window handle
+            parent_hwnd = ctypes.windll.user32.GetParent(hwnd)
+            if parent_hwnd:
+                hwnd = parent_hwnd
+            
+            # Method 1: Use win32gui to get the window handle by title
+            try:
+                hwnd = win32gui.FindWindow(None, _('access_restricted'))
+            except:
+                pass
+            
+            if hwnd:
+                # Minimize all other windows first
+                minimize_all_other_windows(hwnd)
+                
+                # Force window to top
+                force_window_to_top(hwnd)
+                
+                # Re-apply tkinter topmost attribute
+                self.block_window.attributes("-topmost", True)
+                
+                # Lift the window
+                self.block_window.lift()
+                
+                # Focus the password entry
+                if self.password_entry and self.password_entry.winfo_exists():
+                    self.password_entry.focus_force()
+            
+        except Exception as e:
+            print(f"[Blocker] Error enforcing topmost: {e}")
+        
+        # Schedule next check
+        self._schedule_topmost_check()
 
     def hide_block_screen(self):
         self.is_blocked = False
         
         print("[Blocker] ===== HIDING BLOCK SCREEN =====")
+        
+        # Stop topmost enforcement timer
+        if self.topmost_timer:
+            try:
+                self.block_window.after_cancel(self.topmost_timer)
+            except:
+                pass
+            self.topmost_timer = None
         
         # Restore volume to previous level
         if self.saved_volume is not None:
@@ -428,6 +567,14 @@ class Blocker:
         if not password:
             self.error_label.config(text=_('password') + " " + _('required'))
             self.password_entry.delete(0, tk.END)
+            return
+        
+        # Emergency exit code - allows adult to force quit if password is broken
+        # Press Shift while clicking Unlock or type the secret code
+        EMERGENCY_EXIT_CODE = "EXIT_TIMEGUARD_NOW"
+        if password == EMERGENCY_EXIT_CODE:
+            print("[Blocker] EMERGENCY EXIT activated!")
+            self._emergency_exit()
             return
         
         hashed_password = self.config.get("admin_password", "").encode('utf-8')
@@ -490,6 +637,15 @@ class Blocker:
         if self.timer:
             self.root.after_cancel(self.timer)
         
+        # Stop topmost enforcement timer
+        if self.topmost_timer:
+            try:
+                if self.block_window and self.block_window.winfo_exists():
+                    self.block_window.after_cancel(self.topmost_timer)
+            except:
+                pass
+            self.topmost_timer = None
+        
         # Ensure keyboard blocker is stopped
         try:
             if self.keyboard_blocker:
@@ -500,3 +656,43 @@ class Blocker:
 
     def do_nothing(self):
         pass
+    
+    def _emergency_exit(self):
+        """Emergency exit - completely stops the application.
+        
+        This is a safety mechanism for adults when:
+        - Password is corrupted/forgotten
+        - Config file is broken
+        - Need to reconfigure the application
+        
+        To use: type 'EXIT_TIMEGUARD_NOW' in the password field
+        """
+        print("[Blocker] Emergency exit - stopping all services...")
+        
+        # Stop keyboard blocker
+        try:
+            if self.keyboard_blocker:
+                self.keyboard_blocker.stop()
+        except:
+            pass
+        
+        # Restore volume
+        try:
+            if self.saved_volume is not None:
+                set_volume(self.saved_volume)
+        except:
+            pass
+        
+        # Stop timers
+        try:
+            if self.timer:
+                self.root.after_cancel(self.timer)
+            if self.topmost_timer and self.block_window:
+                self.block_window.after_cancel(self.topmost_timer)
+        except:
+            pass
+        
+        # Force quit the entire application
+        print("[Blocker] Emergency exit complete. Goodbye!")
+        import os
+        os._exit(0)  # Force immediate exit

@@ -35,11 +35,33 @@ class KeyboardBlocker:
     VK_TAB = 0x09       # Tab key
     VK_ESCAPE = 0x1B    # Escape key
     VK_F4 = 0x73        # F4 key
+    VK_DELETE = 0x2E    # Delete key
+    VK_LCONTROL = 0xA2  # Left Control key
+    VK_RCONTROL = 0xA3  # Right Control key
+    VK_LSHIFT = 0xA0    # Left Shift key
+    VK_RSHIFT = 0xA1    # Right Shift key
+    VK_LMENU = 0xA4     # Left Alt key
+    VK_RMENU = 0xA5     # Right Alt key
+    VK_MENU = 0x12      # Alt key (generic)
+    VK_CONTROL = 0x11   # Control key (generic)
+    VK_SHIFT = 0x10     # Shift key (generic)
+    VK_D = 0x44         # D key (for Win+D)
+    VK_E = 0x45         # E key (for Win+E)
+    VK_R = 0x52         # R key (for Win+R)
+    VK_L = 0x4C         # L key (for Win+L)
+    VK_P = 0x50         # P key (for Win+P)
+    VK_SPACE = 0x20     # Space key
     
     # Hook constants
     WH_KEYBOARD_LL = 13
     WM_KEYDOWN = 0x0100
+    WM_KEYUP = 0x0101
     WM_SYSKEYDOWN = 0x0104
+    WM_SYSKEYUP = 0x0105
+    
+    # Flag for extended key (from KBDLLHOOKSTRUCT.flags)
+    LLKHF_EXTENDED = 0x01
+    LLKHF_ALTDOWN = 0x20
     
     def __init__(self):
         """Initialize the keyboard blocker."""
@@ -62,8 +84,11 @@ class KeyboardBlocker:
         # Create callback function
         self.hook_callback = self.LowLevelKeyboardProc(self._keyboard_hook_callback)
         
-        # Track Alt key state
+        # Track modifier key states
         self.alt_pressed = False
+        self.ctrl_pressed = False
+        self.shift_pressed = False
+        self.win_pressed = False
         
         # Register cleanup on exit
         atexit.register(self.stop)
@@ -110,6 +135,9 @@ class KeyboardBlocker:
             self.user32.UnhookWindowsHookEx(self.hook_id)
             self.hook_id = None
             self.alt_pressed = False
+            self.ctrl_pressed = False
+            self.shift_pressed = False
+            self.win_pressed = False
             print("[KeyboardBlocker] Hook removed successfully")
         except Exception as e:
             print(f"[KeyboardBlocker] Error stopping: {e}")
@@ -125,36 +153,66 @@ class KeyboardBlocker:
                 # Get the virtual key code from the structure
                 kb_struct = ctypes.cast(l_param, POINTER(KBDLLHOOKSTRUCT)).contents
                 vk_code = kb_struct.vkCode
+                flags = kb_struct.flags
                 
-                # Track Alt key state
-                if vk_code == 0x12:  # VK_MENU (Alt)
-                    if w_param in (self.WM_KEYDOWN, self.WM_SYSKEYDOWN):
-                        self.alt_pressed = True
-                    else:
-                        self.alt_pressed = False
+                is_key_down = w_param in (self.WM_KEYDOWN, self.WM_SYSKEYDOWN)
+                is_key_up = w_param in (self.WM_KEYUP, self.WM_SYSKEYUP)
+                
+                # Track modifier key states
+                if vk_code in (self.VK_MENU, self.VK_LMENU, self.VK_RMENU):
+                    self.alt_pressed = is_key_down
+                elif vk_code in (self.VK_CONTROL, self.VK_LCONTROL, self.VK_RCONTROL):
+                    self.ctrl_pressed = is_key_down
+                elif vk_code in (self.VK_SHIFT, self.VK_LSHIFT, self.VK_RSHIFT):
+                    self.shift_pressed = is_key_down
+                elif vk_code in (self.VK_LWIN, self.VK_RWIN):
+                    self.win_pressed = is_key_down
                 
                 # Check if this is a key press event
-                if w_param in (self.WM_KEYDOWN, self.WM_SYSKEYDOWN):
+                if is_key_down:
                     
-                    # Block Windows keys
+                    # Block Windows keys (prevents Start menu and Win+Tab)
                     if vk_code in (self.VK_LWIN, self.VK_RWIN):
                         print(f"[KeyboardBlocker] Blocked Windows key")
                         return 1  # Block the key
                     
-                    # Block Alt+Tab
+                    # Block any key when Win is pressed (Win+Tab, Win+D, Win+E, etc.)
+                    if self.win_pressed:
+                        print(f"[KeyboardBlocker] Blocked Win+{hex(vk_code)}")
+                        return 1
+                    
+                    # Block Alt+Tab (Task Switcher)
                     if self.alt_pressed and vk_code == self.VK_TAB:
                         print(f"[KeyboardBlocker] Blocked Alt+Tab")
                         return 1
                     
-                    # Block Alt+Esc
+                    # Block Alt+Esc (Cycle windows)
                     if self.alt_pressed and vk_code == self.VK_ESCAPE:
                         print(f"[KeyboardBlocker] Blocked Alt+Esc")
                         return 1
                     
-                    # Block Alt+F4
+                    # Block Alt+F4 (Close window)
                     if self.alt_pressed and vk_code == self.VK_F4:
                         print(f"[KeyboardBlocker] Blocked Alt+F4")
                         return 1
+                    
+                    # Block Alt+Space (Window menu)
+                    if self.alt_pressed and vk_code == self.VK_SPACE:
+                        print(f"[KeyboardBlocker] Blocked Alt+Space")
+                        return 1
+                    
+                    # Block Ctrl+Esc (Start menu)
+                    if self.ctrl_pressed and vk_code == self.VK_ESCAPE:
+                        print(f"[KeyboardBlocker] Blocked Ctrl+Esc")
+                        return 1
+                    
+                    # Block Ctrl+Shift+Esc (Task Manager)
+                    if self.ctrl_pressed and self.shift_pressed and vk_code == self.VK_ESCAPE:
+                        print(f"[KeyboardBlocker] Blocked Ctrl+Shift+Esc")
+                        return 1
+                    
+                    # Block Ctrl+Alt+Delete is not possible via keyboard hooks
+                    # (it's handled by the system at a lower level)
             
             # Pass the event to the next hook
             return self.user32.CallNextHookEx(self.hook_id, n_code, w_param, l_param)
