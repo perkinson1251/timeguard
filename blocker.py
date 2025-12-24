@@ -13,15 +13,16 @@ import win32con
 import win32process
 from localization import get_localization, _
 from keyboard_blocker import KeyboardBlocker
+from logger import log_info, log_debug, log_warning, log_error
 
 # Audio control imports
 try:
     from comtypes import CLSCTX_ALL, CoInitialize
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
     AUDIO_AVAILABLE = True
-    print("[System] Audio control libraries loaded successfully")
+    log_info("Audio control libraries loaded successfully")
 except ImportError as e:
-    print(f"[System] Audio control not available: {e}")
+    log_warning(f"Audio control not available: {e}")
     AUDIO_AVAILABLE = False
 
 CONFIG_FILE = "config.json"
@@ -71,7 +72,7 @@ def force_window_to_top(hwnd):
         
         return True
     except Exception as e:
-        print(f"[Window] Error forcing window to top: {e}")
+        log_debug(f"Window] Error forcing window to top: {e}")
         return False
 
 def minimize_all_other_windows(exclude_hwnd):
@@ -94,7 +95,7 @@ def minimize_all_other_windows(exclude_hwnd):
         
         win32gui.EnumWindows(callback, exclude_hwnd)
     except Exception as e:
-        print(f"[Window] Error minimizing windows: {e}")
+        log_debug(f"Window] Error minimizing windows: {e}")
 
 def stop_all_media():
     """Stop all media playback using multiple methods."""
@@ -124,10 +125,10 @@ def stop_all_media():
         user32.SendMessageW(hwnd, WM_APPCOMMAND, 0, APPCOMMAND_MEDIA_STOP << 16)
         user32.SendMessageW(hwnd, WM_APPCOMMAND, 0, APPCOMMAND_MEDIA_PAUSE << 16)
         
-        print("Media stop commands sent")
+        log_debug("Media stop commands sent")
         
     except Exception as e:
-        print(f"Error stopping media: {e}")
+        log_error(f" stopping media: {e}")
 
 def minimize_fullscreen_windows():
     """Minimize all fullscreen windows to ensure the block screen is visible."""
@@ -154,12 +155,12 @@ def minimize_fullscreen_windows():
         win32gui.EnumWindows(callback, desktop)
         
     except Exception as e:
-        print(f"Error minimizing fullscreen windows: {e}")
+        log_error(f" minimizing fullscreen windows: {e}")
 
 def get_volume_interface():
     """Get the audio volume interface."""
     if not AUDIO_AVAILABLE:
-        print("[Volume] Audio control libraries not available")
+        log_debug("Volume] Audio control libraries not available")
         return None
     
     try:
@@ -174,19 +175,19 @@ def get_volume_interface():
         
         # Check if devices has _dev attribute (newer pycaw)
         if hasattr(devices, '_dev'):
-            print("[Volume] Using _dev attribute for newer pycaw")
+            log_debug("Volume] Using _dev attribute for newer pycaw")
             interface = devices._dev.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
         else:
             # Older pycaw API
-            print("[Volume] Using direct Activate for older pycaw")
+            log_debug("Volume] Using direct Activate for older pycaw")
             interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
         
         # Cast to IAudioEndpointVolume pointer
         volume = ctypes.cast(interface, ctypes.POINTER(IAudioEndpointVolume))
-        print(f"[Volume] Successfully obtained volume interface")
+        log_debug(f"Volume] Successfully obtained volume interface")
         return volume
     except Exception as e:
-        print(f"[Volume] Error getting volume interface: {e}")
+        log_debug(f"Volume] Error getting volume interface: {e}")
         import traceback
         traceback.print_exc()
         return None
@@ -197,12 +198,12 @@ def get_current_volume():
         volume = get_volume_interface()
         if volume:
             current_volume = volume.GetMasterVolumeLevelScalar()
-            print(f"[Volume] Current volume level: {current_volume * 100:.0f}%")
+            log_debug(f"Volume] Current volume level: {current_volume * 100:.0f}%")
             return current_volume
         else:
-            print("[Volume] Failed to get volume interface")
+            log_debug("Volume] Failed to get volume interface")
     except Exception as e:
-        print(f"[Volume] Error getting current volume: {e}")
+        log_debug(f"Volume] Error getting current volume: {e}")
         import traceback
         traceback.print_exc()
     return None
@@ -215,12 +216,12 @@ def set_volume(level):
             # Clamp value between 0.0 and 1.0
             level = max(0.0, min(1.0, level))
             volume.SetMasterVolumeLevelScalar(level, None)
-            print(f"[Volume] Volume set to: {level * 100:.0f}%")
+            log_debug(f"Volume] Volume set to: {level * 100:.0f}%")
             return True
         else:
-            print("[Volume] Failed to get volume interface for setting")
+            log_debug("Volume] Failed to get volume interface for setting")
     except Exception as e:
-        print(f"[Volume] Error setting volume: {e}")
+        log_debug(f"Volume] Error setting volume: {e}")
         import traceback
         traceback.print_exc()
     return False
@@ -250,9 +251,9 @@ def minimize_all_windows():
         # Release Win key
         user32.keybd_event(VK_LWIN, 0, 2, 0)
         
-        print("All windows minimized (desktop shown)")
+        log_debug("All windows minimized (desktop shown)")
     except Exception as e:
-        print(f"Error minimizing all windows: {e}")
+        log_error(f" minimizing all windows: {e}")
 
 def is_valid_time_format(time_str):
     try:
@@ -339,33 +340,33 @@ class Blocker:
     def show_block_screen(self):
         self.is_blocked = True
         if self.block_window is None or not self.block_window.winfo_exists():
-            print("[Blocker] ===== STARTING BLOCK SCREEN =====")
+            log_debug("Blocker] ===== STARTING BLOCK SCREEN =====")
             
             # Save current volume level
-            print("[Blocker] Saving current volume level...")
+            log_debug("Blocker] Saving current volume level...")
             self.saved_volume = get_current_volume()
             if self.saved_volume is not None:
-                print(f"[Blocker] Saved volume: {self.saved_volume * 100:.0f}%")
+                log_debug(f"Blocker] Saved volume: {self.saved_volume * 100:.0f}%")
             else:
-                print("[Blocker] WARNING: Could not save current volume!")
+                log_debug("Blocker] WARNING: Could not save current volume!")
             
             # Set volume to 0
-            print("[Blocker] Setting volume to 0%...")
+            log_debug("Blocker] Setting volume to 0%...")
             success = set_volume(0.0)
             if success:
-                print("[Blocker] Volume muted successfully")
+                log_debug("Blocker] Volume muted successfully")
             else:
-                print("[Blocker] WARNING: Failed to mute volume!")
+                log_debug("Blocker] WARNING: Failed to mute volume!")
             
             # Minimize all windows to show desktop
-            print("[Blocker] Minimizing all windows...")
+            log_debug("Blocker] Minimizing all windows...")
             minimize_all_windows()
             
             # Small delay to let desktop show
             time.sleep(0.1)
             
             # Stop all media playback
-            print("[Blocker] Stopping media playback...")
+            log_debug("Blocker] Stopping media playback...")
             stop_all_media()
             minimize_fullscreen_windows()
 
@@ -374,9 +375,9 @@ class Blocker:
                 if self.keyboard_blocker is None:
                     self.keyboard_blocker = KeyboardBlocker()
                 self.keyboard_blocker.start()
-                print("[Blocker] Keyboard blocking activated")
+                log_debug("Blocker] Keyboard blocking activated")
             except Exception as e:
-                print(f"[Blocker] Failed to start keyboard blocker: {e}")
+                log_debug(f"Blocker] Failed to start keyboard blocker: {e}")
 
             self.block_window = tk.Toplevel(self.root)
             self.block_window.title(_('access_restricted'))
@@ -516,7 +517,7 @@ class Blocker:
                     self.password_entry.focus_force()
             
         except Exception as e:
-            print(f"[Blocker] Error enforcing topmost: {e}")
+            log_debug(f"Blocker] Error enforcing topmost: {e}")
         
         # Schedule next check
         self._schedule_topmost_check()
@@ -524,7 +525,7 @@ class Blocker:
     def hide_block_screen(self):
         self.is_blocked = False
         
-        print("[Blocker] ===== HIDING BLOCK SCREEN =====")
+        log_debug("Blocker] ===== HIDING BLOCK SCREEN =====")
         
         # Stop topmost enforcement timer
         if self.topmost_timer:
@@ -536,29 +537,29 @@ class Blocker:
         
         # Restore volume to previous level
         if self.saved_volume is not None:
-            print(f"[Blocker] Restoring volume to {self.saved_volume * 100:.0f}%...")
+            log_debug(f"Blocker] Restoring volume to {self.saved_volume * 100:.0f}%...")
             success = set_volume(self.saved_volume)
             if success:
-                print(f"[Blocker] Volume restored successfully to {self.saved_volume * 100:.0f}%")
+                log_debug(f"Blocker] Volume restored successfully to {self.saved_volume * 100:.0f}%")
             else:
-                print("[Blocker] WARNING: Failed to restore volume!")
+                log_debug("Blocker] WARNING: Failed to restore volume!")
             self.saved_volume = None
         else:
-            print("[Blocker] No saved volume to restore")
+            log_debug("Blocker] No saved volume to restore")
         
         # Stop keyboard blocker
         try:
             if self.keyboard_blocker:
                 self.keyboard_blocker.stop()
-                print("[Blocker] Keyboard blocking deactivated")
+                log_debug("Blocker] Keyboard blocking deactivated")
         except Exception as e:
-            print(f"[Blocker] Error stopping keyboard blocker: {e}")
+            log_debug(f"Blocker] Error stopping keyboard blocker: {e}")
         
         if self.block_window and self.block_window.winfo_exists():
             self.block_window.destroy()
             self.block_window = None
         
-        print("[Blocker] Block screen hidden")
+        log_debug("Blocker] Block screen hidden")
 
     def check_password_inline(self):
         """Check password directly from the block screen without opening a dialog."""
@@ -573,7 +574,7 @@ class Blocker:
         # Press Shift while clicking Unlock or type the secret code
         EMERGENCY_EXIT_CODE = "EXIT_TIMEGUARD_NOW"
         if password == EMERGENCY_EXIT_CODE:
-            print("[Blocker] EMERGENCY EXIT activated!")
+            log_debug("Blocker] EMERGENCY EXIT activated!")
             self._emergency_exit()
             return
         
@@ -592,7 +593,7 @@ class Blocker:
                 self.password_entry.delete(0, tk.END)
                 self.password_entry.focus_set()
         except Exception as e:
-            print(f"Error checking password: {e}")
+            log_error(f" checking password: {e}")
             self.error_label.config(text=_('error'))
             self.password_entry.delete(0, tk.END)
 
@@ -650,9 +651,9 @@ class Blocker:
         try:
             if self.keyboard_blocker:
                 self.keyboard_blocker.stop()
-                print("[Blocker] Keyboard blocker stopped on exit")
+                log_debug("Blocker] Keyboard blocker stopped on exit")
         except Exception as e:
-            print(f"[Blocker] Error stopping keyboard blocker on exit: {e}")
+            log_debug(f"Blocker] Error stopping keyboard blocker on exit: {e}")
 
     def do_nothing(self):
         pass
@@ -667,7 +668,7 @@ class Blocker:
         
         To use: type 'EXIT_TIMEGUARD_NOW' in the password field
         """
-        print("[Blocker] Emergency exit - stopping all services...")
+        log_debug("Blocker] Emergency exit - stopping all services...")
         
         # Stop keyboard blocker
         try:
@@ -693,6 +694,6 @@ class Blocker:
             pass
         
         # Force quit the entire application
-        print("[Blocker] Emergency exit complete. Goodbye!")
+        log_debug("Blocker] Emergency exit complete. Goodbye!")
         import os
         os._exit(0)  # Force immediate exit

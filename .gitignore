@@ -188,4 +188,5 @@ build/
 dist/
 
 # Config files (contains user-specific settings)
-config.json
+config.jsonlogs/
+logs

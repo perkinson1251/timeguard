@@ -1,0 +1,35 @@
+{
+  "admin_password": "$2b$12$D7XEDA7rMSrIBKfXbP6GfervCtQmRv7U6Od4onvaQi6vjxJreykuC",
+  "enabled": true,
+  "schedule": {
+    "0": {
+      "start": "10:00",
+      "end": "15:00"
+    },
+    "1": {
+      "start": "10:00",
+      "end": "15:00"
+    },
+    "2": {
+      "start": "10:00",
+      "end": "15:00"
+    },
+    "3": {
+      "start": "10:00",
+      "end": "15:00"
+    },
+    "4": {
+      "start": "10:00",
+      "end": "15:00"
+    },
+    "5": {
+      "start": "10:00",
+      "end": "15:00"
+    },
+    "6": {
+      "start": "10:00",
+      "end": "15:00"
+    }
+  },
+  "language": "uk"
+}

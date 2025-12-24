@@ -6,6 +6,7 @@ Blocks system hotkeys (Win, Alt+Tab, etc.) during screen lock
 import ctypes
 from ctypes import wintypes, POINTER, Structure, c_int, c_long, c_longlong
 import atexit
+from logger import log_info, log_debug, log_error, log_blocked_key
 
 # LRESULT is a pointer-sized integer
 if ctypes.sizeof(ctypes.c_void_p) == 8:  # 64-bit
@@ -93,12 +94,12 @@ class KeyboardBlocker:
         # Register cleanup on exit
         atexit.register(self.stop)
         
-        print("[KeyboardBlocker] Initialized")
+        log_debug("KeyboardBlocker initialized")
     
     def start(self):
         """Install the keyboard hook to start blocking keys."""
         if self.hook_id is not None:
-            print("[KeyboardBlocker] Already running")
+            log_debug("KeyboardBlocker already running")
             return True
         
         try:
@@ -112,16 +113,16 @@ class KeyboardBlocker:
             )
             
             if self.hook_id:
-                print("[KeyboardBlocker] Hook installed successfully")
+                log_info("Keyboard hook installed successfully")
                 return True
             else:
                 # Get last error for debugging
                 error_code = self.kernel32.GetLastError()
-                print(f"[KeyboardBlocker] Failed to install hook. Error code: {error_code}")
+                log_error(f"Failed to install keyboard hook. Error code: {error_code}")
                 return False
                 
         except Exception as e:
-            print(f"[KeyboardBlocker] Error starting: {e}")
+            log_error(f"KeyboardBlocker error starting: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -138,9 +139,9 @@ class KeyboardBlocker:
             self.ctrl_pressed = False
             self.shift_pressed = False
             self.win_pressed = False
-            print("[KeyboardBlocker] Hook removed successfully")
+            log_info("Keyboard hook removed successfully")
         except Exception as e:
-            print(f"[KeyboardBlocker] Error stopping: {e}")
+            log_error(f"KeyboardBlocker error stopping: {e}")
     
     def _keyboard_hook_callback(self, n_code, w_param, l_param):
         """
@@ -173,42 +174,35 @@ class KeyboardBlocker:
                     
                     # Block Windows keys (prevents Start menu and Win+Tab)
                     if vk_code in (self.VK_LWIN, self.VK_RWIN):
-                        print(f"[KeyboardBlocker] Blocked Windows key")
+                        # Don't log here - can cause segfault in hook callback
                         return 1  # Block the key
                     
                     # Block any key when Win is pressed (Win+Tab, Win+D, Win+E, etc.)
                     if self.win_pressed:
-                        print(f"[KeyboardBlocker] Blocked Win+{hex(vk_code)}")
                         return 1
                     
                     # Block Alt+Tab (Task Switcher)
                     if self.alt_pressed and vk_code == self.VK_TAB:
-                        print(f"[KeyboardBlocker] Blocked Alt+Tab")
                         return 1
                     
                     # Block Alt+Esc (Cycle windows)
                     if self.alt_pressed and vk_code == self.VK_ESCAPE:
-                        print(f"[KeyboardBlocker] Blocked Alt+Esc")
                         return 1
                     
                     # Block Alt+F4 (Close window)
                     if self.alt_pressed and vk_code == self.VK_F4:
-                        print(f"[KeyboardBlocker] Blocked Alt+F4")
                         return 1
                     
                     # Block Alt+Space (Window menu)
                     if self.alt_pressed and vk_code == self.VK_SPACE:
-                        print(f"[KeyboardBlocker] Blocked Alt+Space")
                         return 1
                     
                     # Block Ctrl+Esc (Start menu)
                     if self.ctrl_pressed and vk_code == self.VK_ESCAPE:
-                        print(f"[KeyboardBlocker] Blocked Ctrl+Esc")
                         return 1
                     
                     # Block Ctrl+Shift+Esc (Task Manager)
                     if self.ctrl_pressed and self.shift_pressed and vk_code == self.VK_ESCAPE:
-                        print(f"[KeyboardBlocker] Blocked Ctrl+Shift+Esc")
                         return 1
                     
                     # Block Ctrl+Alt+Delete is not possible via keyboard hooks
@@ -218,7 +212,7 @@ class KeyboardBlocker:
             return self.user32.CallNextHookEx(self.hook_id, n_code, w_param, l_param)
             
         except Exception as e:
-            print(f"[KeyboardBlocker] Error in callback: {e}")
+            # Don't log here - can cause issues in hook callback
             # On error, pass the event through
             try:
                 return self.user32.CallNextHookEx(self.hook_id, n_code, w_param, l_param)
